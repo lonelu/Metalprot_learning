@@ -44,7 +44,7 @@ def run_site_enumeration(tasks: list, coordination_number: tuple):
     for pdb_file in tasks:
         try:
             print(pdb_file)
-            protein = loader.MetalloProtein(pdb_file)
+            protein = loader.Protein(pdb_file)
             fcn_cores, cnn_cores = protein.enumerate_cores(cnn=True, fcn=True, coordination_number=coordination_number)
             unique_fcn_cores, unique_cnn_cores = loader.remove_degenerate_cores(fcn_cores), loader.remove_degenerate_cores(cnn_cores)
             identifiers, distance_matrices, encodings, channels, metal_coordinates, labels = [], [], [], [], [], []
