@@ -10,6 +10,7 @@ of remove_degenerate_cores.
 """
 
 import os
+from turtle import distance
 import numpy as np
 import pandas as pd
 import itertools 
@@ -262,6 +263,23 @@ class CNNCore(Core):
                 seq_channels[ind][j][idx] = 1 # horizontal rows of 1's in first 20 channels
                 seq_channels[j][ind][idx+20] = 1 # vertical columns of 1's in next 20 channels
         return np.stack([seq_channels[:, :, i] for i in range(40)], axis=0)
+
+    @staticmethod
+    def _transform_distance_data(distance_channels: np.ndarray):
+        """ 
+        Code adapted from dataprocess.py to transform the distance channels into final input.
+        """
+        #perform transformation on distance channels
+        distance_channels[distance_channels == 0] = 20
+        distance_channels = (distance_channels - 2) / (18)
+        distance_channels = 1 - distance_channels
+        
+        #fill diagonals with 1s
+        _distance_channels = []
+        for channel in distance_channels:
+            np.fill_diagonal(channel, 1)
+            _distance_channels.append(channel)
+        return np.stack(_distance_channels, axis=0)
 
     def _compute_channels(self):
         channels = np.zeros((44,12,12))
