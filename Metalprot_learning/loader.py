@@ -276,7 +276,7 @@ class CNNCore(Core):
         
         #fill diagonals with 1s
         _distance_channels = []
-        for channel in distance_channels:
+        for channel in distance_channels.copy():
             np.fill_diagonal(channel, 1)
             _distance_channels.append(channel)
         return np.stack(_distance_channels, axis=0)
@@ -285,6 +285,7 @@ class CNNCore(Core):
         channels = np.zeros((44,12,12))
         m, n = self.distance_channels[0].shape
         channels[0:4, 0:m, 0:n] = np.stack(self.distance_channels, axis=0)        
+        channels[0:4] = CNNCore._transform_distance_data(channels[0:4])
         
         #compute sequence channels
         seq_channels = self._compute_seq_channels(self.sequence)
@@ -456,7 +457,7 @@ class Protein:
         edge_list = Protein._filter_by_angle(np.vstack(edge_list), self.structure, edge_weights)
         cliques = enumerateCliques(np.array(edge_list), coordination_number[1])[coordination_number[0]:]
 
-        max_atoms = 12 * 4 if self.cbeta else 12 * 5
+        max_atoms = 12 * 4 if not self.cbeta else 12 * 5
         fcn_cores, cnn_cores = self._construct_cores(cliques, max_atoms, no_neighbors, cnn, fcn)
         return fcn_cores, cnn_cores
 
