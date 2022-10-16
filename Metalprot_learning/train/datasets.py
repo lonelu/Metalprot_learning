@@ -25,6 +25,20 @@ class ImageSet(Dataset):
         label = self.labels[index]
         return observation, label 
 
+class DistanceData(Dataset):
+    "Custom dataset class for FCN distance data"
+    def __init__(self, df: pd.DataFrame, encodings: bool):
+        self.labels = np.vstack([array for array in df['labels']])
+        observations = np.hstack([np.vstack([array for array in df['distance_matrices']]), np.vstack([array for array in df['encodings']])]) if encodings else np.vstack([array for array in df['distance_matrices']])
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, index):
+        observation = self.observations[index]
+        label = self.labels[index]
+        return observation, label 
+
 def split_data(features_file: str, path2output: str, partitions: tuple, seed: int, write_json: bool):
     """
     Splits data into training and test sets. Returns a tuple of train, test, and validation dataframes, in that order.
