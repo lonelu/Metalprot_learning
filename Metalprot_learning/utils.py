@@ -13,8 +13,11 @@ class AlignmentError(Error):
     pass
 
 class EncodingError(Error):
-    """Raise when unrecognized amino acid is found during encoding"""
+    """Raised when unrecognized amino acid is found during encoding"""
     pass
 
 class PermutationError(Error):
-    """Raise when an issue during permutation occurs"""
+    """Raised when an issue during permutation occurs"""
+
+class ModelTypeError(Error):
+    """Raised when an unrecognized value for config['model_type'] is provided"""
