@@ -46,9 +46,8 @@ def run_site_enumeration(tasks: list, coordination_number: tuple):
             print(pdb_file)
             protein = loader.Protein(pdb_file)
             fcn_cores, cnn_cores = protein.enumerate_cores(cnn=True, fcn=True, coordination_number=coordination_number)
-            unique_fcn_cores, unique_cnn_cores = loader.remove_degenerate_cores(fcn_cores), loader.remove_degenerate_cores(cnn_cores)
             identifiers, distance_matrices, encodings, channels, metal_coordinates, labels = [], [], [], [], [], []
-            for fcn_core, cnn_core in zip(unique_fcn_cores, unique_cnn_cores):
+            for fcn_core, cnn_core in zip(fcn_cores, cnn_cores):
                 identifiers.append(fcn_core.identifiers)
                 distance_matrices.append(fcn_core.distance_matrix)
                 encodings.append(fcn_core.encoding)
@@ -77,7 +76,7 @@ if __name__ == '__main__':
         no_jobs = int(sys.argv[2])
         job_id = int(sys.argv[3]) - 1
 
-    PATH2PDBS = '/Users/jonathanzhang/Documents/ucsf/degrado/DeGrado-Lab-Notebook/metal-binding/experiments/20221002_edge_case_testing/data/edge_cases'
+    PATH2PDBS = '/Users/jonathanzhang/Documents/ucsf/degrado/DeGrado-Lab-Notebook/metal-binding/experiments/20221013_design_and_prediction_script_troubleshooting/data/src/'
     COORDINATION_NUMBER = (2,4)
 
     tasks = distribute_tasks(PATH2PDBS, no_jobs, job_id)
@@ -85,11 +84,11 @@ if __name__ == '__main__':
     classifier_features, regressor_features = np.stack(features_df['channels'].tolist(), axis=0), np.hstack([np.vstack([matrix.flatten() for matrix in features_df['distance_matrices'].tolist()]), np.vstack(features_df['encodings'])])
     classifier, regressor = instantiate_models()
     classifications = classifier.forward(torch.from_numpy(classifier_features)).cpu().detach().numpy()
-    rounded_classifications = classifications.round()
-    metal_site_inds = np.argwhere(classifications == 1).flatten()
-    _regressions = regressor.forward(torch.from_numpy(regressor_features[metal_site_inds])).cpu().detach().numpy().round()
+    rounded_classifications = classifications.round().flatten()
+    metal_site_inds = np.argwhere(rounded_classifications == 1).flatten()
+    _regressions = regressor.forward(torch.from_numpy(regressor_features[metal_site_inds])).cpu().detach().numpy()
     
-    regressions = np.zeros((len(classifications), 48))
+    regressions = np.zeros((len(rounded_classifications), 48))
     regressions[metal_site_inds] = _regressions
 
     features_df['classifications'] = classifications
