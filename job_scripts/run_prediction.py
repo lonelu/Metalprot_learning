@@ -83,17 +83,17 @@ if __name__ == '__main__':
     features_df, failed = run_site_enumeration(tasks, COORDINATION_NUMBER)
     classifier_features, regressor_features = np.stack(features_df['channels'].tolist(), axis=0), np.hstack([np.vstack([matrix.flatten() for matrix in features_df['distance_matrices'].tolist()]), np.vstack(features_df['encodings'])])
     classifier, regressor = instantiate_models()
-    classifications = classifier.forward(torch.from_numpy(classifier_features)).cpu().detach().numpy()
-    rounded_classifications = classifications.round().flatten()
-    metal_site_inds = np.argwhere(rounded_classifications == 1).flatten()
-    _regressions = regressor.forward(torch.from_numpy(regressor_features[metal_site_inds])).cpu().detach().numpy()
+    # classifications = classifier.forward(torch.from_numpy(classifier_features)).cpu().detach().numpy()
+    # rounded_classifications = classifications.round().flatten()
+    # metal_site_inds = np.argwhere(rounded_classifications == 1).flatten()
+    _regressions = regressor.forward(torch.from_numpy(regressor_features)).cpu().detach().numpy()
     
-    regressions = np.zeros((len(rounded_classifications), 48))
-    regressions[metal_site_inds] = _regressions
+    # regressions = np.zeros((len(rounded_classifications), 48))
+    # regressions[metal_site_inds] = _regressions
 
-    features_df['classifications'] = classifications
-    features_df['rounded_classifications'] = rounded_classifications
-    features_df['regressions'] = list(regressions)
+    # features_df['classifications'] = classifications
+    # features_df['rounded_classifications'] = rounded_classifications
+    features_df['regressions'] = list(_regressions)
     features_df.to_pickle(os.path.join(path2output, f'predictions{job_id}.pkl'))
 
     failed = list(filter(None, failed))
