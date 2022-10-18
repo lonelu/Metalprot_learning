@@ -88,7 +88,7 @@ class Core:
         if self.putative:
             label = None
 
-        if not distogram:
+        elif not distogram:
             label = np.zeros(12*4)
             _label = buildDistMatrix(self.structure.select('protein').select('name N CA C O'), self.structure.select('hetero')).squeeze()
             label[0:len(_label)] = _label
