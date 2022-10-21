@@ -13,26 +13,26 @@ from sklearn.model_selection import KFold
 from Metalprot_learning.utils import ModelTypeError
 from Metalprot_learning.train import datasets, models
 
-def load_data(features_file: str, path2output: str, partitions: tuple, batch_size: int, seed: int, encodings: bool, model_type: str, write_json: bool):
+def load_data(features_file: str, path2output: str, partitions: tuple, batch_size: int, seed: int, encodings: bool, model_architecture: str, write_json: bool):
     """
     Loads data for model training.
     :param encodings: boolean that determines whether or not sequence encodings are included during model training.
     """
     train_set, test_set, val_set = datasets.split_data(features_file, path2output, partitions, seed, write_json)
-    if model_type == 'CNN':
+    if model_architecture == 'CNN':
         train_dataloader = torch.utils.data.DataLoader(datasets.ImageSet(train_set, encodings), batch_size=batch_size, shuffle=True)
         test_dataloader = torch.utils.data.DataLoader(datasets.ImageSet(test_set, encodings), batch_size=batch_size, shuffle=False)
         validation_dataloader = torch.utils.data.DataLoader(datasets.ImageSet(val_set, encodings), batch_size=batch_size, shuffle=False)
-    elif model_type == 'FCN':
+    elif model_architecture == 'FCN':
         train_dataloader = torch.utils.data.DataLoader(datasets.DistanceData(train_set, encodings), batch_size=batch_size, shuffle=True)
         test_dataloader = torch.utils.data.DataLoader(datasets.DistanceData(test_set, encodings), batch_size=batch_size, shuffle=False)
         validation_dataloader = torch.utils.data.DataLoader(datasets.DistanceData(val_set, encodings), batch_size=batch_size, shuffle=False)
     return train_dataloader, test_dataloader, validation_dataloader
 
-def configure_model(config: dict):
-    if config['model_type'] == 'CNN':
+def configure_model(config: dict, model_architecture: str):
+    if model_architecture == 'CNN':
         model = models.AlphafoldNet(config)
-    elif config['model_type'] == 'FCN':
+    elif model_architecture == 'FCN':
         model = models.FullyConnectedNet(config['input_dim'], config['l1'], config['l2'], config['l3'], config['output_dim'], config['input_dropout'], config['hidden_dropout'])
     else:
         raise ModelTypeError
@@ -75,7 +75,7 @@ def validation_loop(model, test_dataloader, loss_fn, device):
     vloss /= len(test_dataloader)
     return vloss
 
-def train_model(path2output: str, config: dict, features_file: str, write_json=True):
+def train_model(path2output: str, config: dict, features_file: str, model_architecture: str, write_json=True):
     """
     Main function for running model training.
     :param config: dictionary defining model hyperparameters for a given training run.
@@ -84,7 +84,7 @@ def train_model(path2output: str, config: dict, features_file: str, write_json=T
     torch.manual_seed(config['seed'])
 
     #instantiate model
-    model = configure_model(config)
+    model = configure_model(config, model_architecture)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model = model.to(device)
 
@@ -92,7 +92,7 @@ def train_model(path2output: str, config: dict, features_file: str, write_json=T
     print(f'Model on GPU? {next(model.parameters()).is_cuda}')
 
     #instantiate dataloader objects for train and test sets
-    train_loader, test_loader, val_loader = load_data(features_file, path2output, (0.8,0.1,0.1), config['batch_size'], config['seed'], config['encodings'], config['model_type'], write_json)
+    train_loader, test_loader, val_loader = load_data(features_file, path2output, (0.8,0.1,0.1), config['batch_size'], config['seed'], config['encodings'], model_architecture, write_json)
 
     #define optimizer and loss function
     optimizer = torch.optim.Adam([param for param in model.parameters() if param.requires_grad],lr=config['lr'])    
