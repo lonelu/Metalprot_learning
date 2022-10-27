@@ -9,17 +9,37 @@ import os
 import sys
 import json
 import torch
+import argparse
 import numpy as np
 import pandas as pd
 from Metalprot_learning import loader
 from Metalprot_learning.train.models import FullyConnectedNet, Classifier
 
-def distribute_tasks(path2pdbs: str, no_jobs: int, job_id: int):
+def distribute_tasks(path2pdbs: str, path2npzs: str, num_jobs: int, job_id: int):
     """
     Distributes pdb files across multiple cores for loading.
     """
-    pdbs = [os.path.join(path2pdbs, file) for file in os.listdir(path2pdbs) if '.pdb' in file]
-    tasks = [pdbs[i] for i in range(0, len(pdbs)) if i % no_jobs == job_id]
+    # print('path2pdbs =', path2pdbs, '\t', 'path2npzs =', path2npzs)
+    # print('num_jobs =', num_jobs, '\t', 'job_id =', job_id)
+    plist = sorted(os.listdir(path2pdbs))
+    pdbs = [os.path.join(path2pdbs, path) for path in plist if '.pdb' in path]
+    if path2npzs:
+        zlist = sorted(os.listdir(path2npzs))
+        npzs = [os.path.join(path2npzs, path[:-4] + '.npz') for path in plist
+                if path[:-4] + '.npz' in zlist]
+        if len(pdbs) != len(npzs):
+            raise ValueError(('path2npzs is provided, but some PDB files have '
+                              'missing MPNN-generated NPZ files.'))
+        
+        # print(len(pdbs))
+        # print(pdbs)
+        # print(npzs)
+        # print(i % num_jobs == job_id for i in range(len(pdbs)))
+        tasks = [(pdbs[i], npzs[i]) for i in range(len(pdbs)) 
+                 if i % num_jobs == job_id - 1]
+    else:
+        tasks = [(pdbs[i], None) for i in range(len(pdbs)) 
+                 if i % num_jobs == job_id - 1]
     return tasks
 
 def instantiate_models():
@@ -37,16 +57,30 @@ def instantiate_models():
     regressor.eval()
     return classifier, regressor
 
-def run_site_enumeration(tasks: list, coordination_number: tuple):
+def run_site_enumeration(tasks: list, coordination_number: tuple, mpnn_threshold: float, required_chains: list, remove_redundant: bool):
     sources, identifiers, features = [], [], []
     failed = []
-    df = pd.DataFrame()
-    for pdb_file in tasks:
-        try:
+    df = pd.DataFrame(columns=['identifiers', 'source', 'distance_matrices', 
+                               'encodings', 'channels', 'metal_coords', 'labels'])
+    for pdb_file, npz_file in tasks:
+        # try:
+        for char in 'a':
             print(pdb_file)
             protein = loader.Protein(pdb_file)
-            fcn_cores, cnn_cores = protein.enumerate_cores(cnn=True, fcn=True, coordination_number=coordination_number)
-            unique_fcn_cores, unique_cnn_cores = loader.remove_degenerate_cores(fcn_cores), loader.remove_degenerate_cores(cnn_cores)
+            if npz_file is not None:
+                with np.load(npz_file) as data:
+                    mpnn_predictions = data['log_p'].reshape((-1, 21))
+            else:
+                mpnn_predictions = None
+            fcn_cores, cnn_cores = protein.enumerate_cores(cnn=True, fcn=True, 
+                                                           coordination_number=coordination_number, 
+                                                           mpnn_predictions=mpnn_predictions, 
+                                                           mpnn_threshold=mpnn_threshold, 
+                                                           required_chains=required_chains)
+            if remove_redundant:
+                unique_fcn_cores, unique_cnn_cores = loader.remove_degenerate_cores(fcn_cores), loader.remove_degenerate_cores(cnn_cores)
+            else:
+                unique_fcn_cores, unique_cnn_cores = fcn_cores, cnn_cores
             identifiers, distance_matrices, encodings, channels, metal_coordinates, labels = [], [], [], [], [], []
             for fcn_core, cnn_core in zip(unique_fcn_cores, unique_cnn_cores):
                 identifiers.append(fcn_core.identifiers)
@@ -64,24 +98,57 @@ def run_site_enumeration(tasks: list, coordination_number: tuple):
                 'metal_coords': metal_coordinates,
                 'labels': labels})])
 
-        except:
-            failed.append(pdb_file)
+        # except:
+        #     failed.append(pdb_file)
     return df, failed
 
+def parse_args():
+    argp = argparse.ArgumentParser()
+    argp.add_argument('path2output', type=os.path.realpath, 
+                      help='Path at which to store model outputs.')
+    argp.add_argument('path2pdbs', type=os.path.realpath, 
+                      help='Path to directory containing input PDB files.')
+    argp.add_argument('--path2npzs', type=os.path.realpath, default='',  
+                      help='Path to directory containing NPZ files from '
+                      'ProteinMPNN run on each PDB in path2pdbs with the '
+                      '--unconditional-probs-only flag set.  If a path is '
+                      'provided, residues are included during site '
+                      'enumeration if their MPNN probabilities of being '
+                      'D, E, H, or S exceed a threshold value.')
+    argp.add_argument('--mpnn_threshold', type=float, default=0.25, 
+                      help='Threshold MPNN-predicted probability of a '
+                      'residue being D, E, H, or S in order for it to '
+                      'be included in cores during site enumeration. '
+                      '(Default: 0.25)')
+    argp.add_argument('--required_chains', nargs='+', 
+                      help='One-letter identifiers for the chains that '
+                      'must be included in every core. If this argument '
+                      'is not provided, cores with residues from any '
+                      'chain are permissible.')
+    argp.add_argument('--remove_redundant', action='store_true', 
+                      help='If this argument is provided, redundant '
+                      'cores will be removed.')
+    argp.add_argument('--num_jobs', type=int, default=1, 
+                      help='Number of jobs to run. (Default: 1)')
+    argp.add_argument('--job_id', type=int, default=0, 
+                      help='ID of current job if multiple jobs are run.')
+    return argp.parse_args()
+
 if __name__ == '__main__':
-    path2output = sys.argv[1] #path to store outputs    
-    no_jobs = 1
-    job_id = 0
+    args = parse_args()
+    path2output = args.path2output
+    path2pdbs = args.path2pdbs
+    path2npzs = args.path2npzs
+    mpnn_threshold = args.mpnn_threshold
+    required_chains = args.required_chains
+    remove_redundant = args.remove_redundant
+    num_jobs = args.num_jobs
+    job_id = args.job_id
 
-    if len(sys.argv) > 3:
-        no_jobs = int(sys.argv[2])
-        job_id = int(sys.argv[3]) - 1
-
-    PATH2PDBS = '/Users/jonathanzhang/Documents/ucsf/degrado/DeGrado-Lab-Notebook/metal-binding/experiments/20221002_edge_case_testing/data/edge_cases'
     COORDINATION_NUMBER = (2,4)
 
-    tasks = distribute_tasks(PATH2PDBS, no_jobs, job_id)
-    features_df, failed = run_site_enumeration(tasks, COORDINATION_NUMBER)
+    tasks = distribute_tasks(path2pdbs, path2npzs, num_jobs, job_id)
+    features_df, failed = run_site_enumeration(tasks, COORDINATION_NUMBER, mpnn_threshold, required_chains, remove_redundant)
     classifier_features, regressor_features = np.stack(features_df['channels'].tolist(), axis=0), np.hstack([np.vstack([matrix.flatten() for matrix in features_df['distance_matrices'].tolist()]), np.vstack(features_df['encodings'])])
     classifier, regressor = instantiate_models()
     classifications = classifier.forward(torch.from_numpy(classifier_features)).cpu().detach().numpy()
@@ -95,6 +162,9 @@ if __name__ == '__main__':
     features_df['classifications'] = classifications
     features_df['rounded_classifications'] = rounded_classifications
     features_df['regressions'] = list(regressions)
+    
+    if not os.path.exists(path2output):
+        os.mkdir(path2output)
     features_df.to_pickle(os.path.join(path2output, f'predictions{job_id}.pkl'))
 
     failed = list(filter(None, failed))

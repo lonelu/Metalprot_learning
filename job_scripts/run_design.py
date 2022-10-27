@@ -42,12 +42,15 @@ def instantiate_models():
 def run_site_enumeration(tasks: list, coordination_number: tuple):
     sources, identifiers, features = [], [], []
     failed = []
-    df = pd.DataFrame()
+    df = pd.DataFrame(columns=['identifiers', 'source', 'distance_matrices', 
+                               'encodings', 'channels', 'metal_coords', 'labels'])
     for pdb_file in tasks:
-        try:
+        # try:
+        for c in 'a':
             print(pdb_file)
             protein = loader.Protein(pdb_file)
-            fcn_cores, cnn_cores = protein.enumerate_cores(fcn=True, cnn=True, coordination_number=coordination_number)
+            fcn_cores, cnn_cores = protein.enumerate_cores(fcn=True, cnn=True, coordination_number=coordination_number, 
+                                                           putative=True)
             unique_fcn_cores, unique_cnn_cores = loader.remove_degenerate_cores(fcn_cores), loader.remove_degenerate_cores(cnn_cores)
             identifiers, distance_matrices, encodings, channels, metal_coordinates, labels = [], [], [], [], [], []
             for fcn_core, cnn_core in zip(unique_fcn_cores, unique_cnn_cores):
@@ -66,23 +69,23 @@ def run_site_enumeration(tasks: list, coordination_number: tuple):
                 'metal_coords': metal_coordinates,
                 'labels': labels})])
 
-        except:
-            failed.append(pdb_file)
+        # except:
+        #     failed.append(pdb_file)
     return df, failed
 
 if __name__ == '__main__':
-    path2output = sys.argv[1] #path to store outputs    
+    path2output = sys.argv[1] #path to store outputs
+    path2pdbs = sys.argv[2]
     no_jobs = 1
     job_id = 0
 
-    if len(sys.argv) > 3:
-        no_jobs = int(sys.argv[2])
-        job_id = int(sys.argv[3]) - 1
+    if len(sys.argv) > 4:
+        no_jobs = int(sys.argv[3])
+        job_id = int(sys.argv[4]) - 1
 
-    PATH2PDBS = '/Users/jonathanzhang/Documents/ucsf/degrado/DeGrado-Lab-Notebook/metal-binding/experiments/20221002_edge_case_testing/data/edge_cases'
     COORDINATION_NUMBER = (2,4)
 
-    tasks = distribute_tasks(PATH2PDBS, no_jobs, job_id)
+    tasks = distribute_tasks(path2pdbs, no_jobs, job_id)
     features_df, failed = run_site_enumeration(tasks, COORDINATION_NUMBER)
     classifier_features, regressor_features = np.stack(features_df['channels'].tolist(), axis=0), np.hstack([np.vstack([matrix.flatten() for matrix in features_df['distance_matrices'].tolist()]), np.vstack(features_df['encodings'])])
     classifier, regressor = instantiate_models()
@@ -92,12 +95,12 @@ if __name__ == '__main__':
     # rounded_classifications = classifications.round()
     # metal_site_inds = np.argwhere(classifications == 1).flatten()
 
-    _regressions = regressor.forward(torch.from_numpy(regressor_features)).cpu().detach().numpy().round()
-    regressions = np.zeros((len(classifications), 48))
-    regressions[metal_site_inds] = _regressions
+    regressions = regressor.forward(torch.from_numpy(regressor_features)).cpu().detach().numpy() # .round()
+    # regressions = np.zeros((len(regressor_features), 48)) # np.zeros((len(classifications), 48))
+    # regressions[metal_site_inds] = _regressions
 
-    features_df['classifications'] = classifications
-    features_df['rounded_classifications'] = rounded_classifications
+    # features_df['classifications'] = classifications
+    # features_df['rounded_classifications'] = rounded_classifications
     features_df['regressions'] = list(regressions)
     features_df.to_pickle(os.path.join(path2output, f'predictions{job_id}.pkl'))
 

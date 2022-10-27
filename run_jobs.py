@@ -31,6 +31,9 @@ Options:
 
     --processing-unit=<P>, -p=<P>  [default: cpu]
         Defines the type of processing unit to run job on. Y designates GPU usage.
+
+    --job-arguments=<A>, -a=<A>
+        String of additional command line arguments to the job script.
 '''
 
 import docopt
@@ -38,7 +41,7 @@ import shutil
 import os
 import subprocess
 
-def run_SGE(job_name: str, num_jobs: int, path: str, job_script: str, time: str, processing_unit: str, mem_free_GB=3, scratch_space_GB=1, keep_job_output_path=True):
+def run_SGE(job_name: str, num_jobs: int, path: str, job_script: str, job_arguments: str, time: str, processing_unit: str, mem_free_GB=3, scratch_space_GB=1, keep_job_output_path=True):
 
     """Runs SGE job on UCSF Wynton cluster.
 
@@ -46,7 +49,9 @@ def run_SGE(job_name: str, num_jobs: int, path: str, job_script: str, time: str,
         num_jobs (int): Number of jobs.
         path (str): Path to output directory to store job logs and output files.
         job_script (str): Path to the script to be submitted.
+        job_arguments (str, optional): Command line arguments to the job script.
         time (str, optional): Time alloted for each task.
+        job_arguments (str, optional): Command line arguments to the job script.
         gpu (str): Defines the processing unit to run job on.
         mem_free_GB (int, optional): Defaults to 3.
         scratch_space_GB (int, optional): Defaults to 1.
@@ -70,7 +75,8 @@ def run_SGE(job_name: str, num_jobs: int, path: str, job_script: str, time: str,
                         './job_scripts/activate_env.sh',
                         job_script,
                         path] \
-                        + [num_jobs]
+                        + job_arguments.split() \
+                        + [' --num_jobs ', str(num_jobs), ' --job_id ']
 
     if processing_unit == 'gpu':
         append = ['-q', 'gpu.q', '-pe', 'smp', num_jobs]
@@ -78,8 +84,8 @@ def run_SGE(job_name: str, num_jobs: int, path: str, job_script: str, time: str,
 
     subprocess.run(qsub_command)
 
-def run_sequential(job_name: str, path: str, job_script: str, keep_job_output_path=True):
-    command = [job_script, path]
+def run_sequential(job_name: str, path: str, job_script: str, job_arguments: str, keep_job_output_path=True):
+    command = [job_script, path] + job_arguments.split()
     subprocess.run(command)
 
 if __name__ == '__main__':
@@ -91,10 +97,10 @@ if __name__ == '__main__':
 
     if arguments['--job-distributor'] == 'SGE':
         num_jobs = arguments['--num-jobs'] if arguments['--num-jobs'] else '1'
-        run_SGE(job_name, num_jobs, path, job_script, arguments['--time'], arguments['--processing-unit'])
+        run_SGE(job_name, num_jobs, path, job_script, arguments['--job-arguments'], arguments['--time'], arguments['--processing-unit'])
 
     elif arguments['--job-distributor'] == 'sequential':
-        run_sequential(job_name, path, job_script)
+        run_sequential(job_name, path, job_script, arguments['--job-arguments'])
 
     else:
         raise IOError('Unknown job distributor: {0}'.format(arguments['--job-distributor']))

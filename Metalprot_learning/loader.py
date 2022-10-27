@@ -88,7 +88,7 @@ class Core:
         if self.putative:
             label = None
 
-        if not distogram:
+        elif not distogram:
             label = np.zeros(12*4)
             _label = buildDistMatrix(self.structure.select('protein').select('name N CA C O'), self.structure.select('hetero')).squeeze()
             label[0:len(_label)] = _label
@@ -439,40 +439,72 @@ class Protein:
             fragment = []
         return fragment 
 
-    def enumerate_cores(self, fcn: bool, cnn: bool, no_neighbors=1, cutoff=15, coordination_number=(2,4)):
+    def enumerate_cores(self, fcn: bool, cnn: bool, no_neighbors=1, cutoff=15, coordination_number=(2,4), mpnn_predictions=None, mpnn_threshold=0.25, required_chains=[]):
         edge_list = []
-        putative_coordinating_resis = self.structure.select('protein').select('name CA').select('resname HIS CYS ASP GLU')
-        #conditional loop: if there are three sites with His, Cys, etc, we can further look for carbonyl, carboxy etc
+        putative_coordinating_resis = self.structure.select('protein').select('name CA')
+        if mpnn_predictions is None:
+            putative_coordinating_resis = \
+                putative_coordinating_resis.select('resname HIS CYS ASP GLU')
         putative_coordinating_resindices = putative_coordinating_resis.getResindices()
+        if mpnn_predictions is not None:
+            if len(mpnn_predictions) != len(putative_coordinating_resindices):
+                raise ValueError(('mpnn_predictions were provided but do not '
+                                  'match the number of residues in the PDB file'))
+            # determine resindices for which the probability of at least one of the four 
+            # metal-coordinating amino acids exceeds the threshold value
+            mask = np.sum(np.exp(mpnn_predictions[:, np.array([2, 3, 6, 15])]) >= 
+                          mpnn_threshold, axis=1).astype(bool)
+            putative_coordinating_resindices = putative_coordinating_resindices[mask]
+            selstr = ' or '.join(['resindex {}'.format(resindex) for resindex in 
+                                  putative_coordinating_resindices])
+            putative_coordinating_resis = putative_coordinating_resis.select(selstr).toAtomGroup()
+        #conditional loop: if there are three sites with His, Cys, etc, we can further look for 
+        # carbonyl, carboxy etc
         dist_mat = buildDistMatrix(putative_coordinating_resis)
         edge_weights = np.array([])
-        row_indexer = 0
-        for col_ind in range(len(dist_mat)):
-            for row_ind in range(1+row_indexer, len(dist_mat)):
+        for col_ind in range(len(dist_mat) - 1):
+            for row_ind in range(col_ind + 1, len(dist_mat)):
                 distance = dist_mat[row_ind, col_ind]
                 if distance <= cutoff:
                     edge_list.append(np.array([putative_coordinating_resindices[col_ind], putative_coordinating_resindices[row_ind]]))
                     edge_weights = np.append(edge_weights, distance)
-            row_indexer += 1
         edge_list = Protein._filter_by_angle(np.vstack(edge_list), self.structure, edge_weights)
         cliques = enumerateCliques(np.array(edge_list), coordination_number[1])[coordination_number[0]:]
 
         max_atoms = 12 * 4 if not self.cbeta else 12 * 5
-        fcn_cores, cnn_cores = self._construct_cores(cliques, max_atoms, no_neighbors, cnn, fcn)
+        fcn_cores, cnn_cores = self._construct_cores(cliques, mpnn_predictions, mpnn_threshold, 
+                                                     required_chains, max_atoms, no_neighbors, cnn, fcn)
         return fcn_cores, cnn_cores
 
-    def _construct_cores(self, cliques, max_atoms: int, no_neighbors: int, fcn: bool, cnn: bool):
+    def _construct_cores(self, cliques, mpnn_predictions, mpnn_threshold, required_chains, max_atoms: int, no_neighbors: int, fcn: bool, cnn: bool):
         fcn_cores, cnn_cores = [], []
-        no_resis = len(set(self.backbone.getResindices()))
+        # pad chains with one value of '_' to avoid off-by-one error of Resindices counting from 1
+        chains = np.hstack([np.array(['_']), self.backbone.select('name CA').getChids()])
+        no_resis = len(self.backbone.select('name CA').getResindices())
         splits = sum([np.vsplit(x, no_resis) for x in np.hsplit(self.distance_matrix, no_resis)], [])
         combinations = [(j,i) for i in range(0, no_resis) for j in range(0, no_resis)]
         split_mapper = dict([(combination, splits[ind]) for combination, ind in zip(combinations, range(len(combinations)))])
 
-        for subclique in cliques:
-            for clique in subclique:
-                binding_core = np.sort(np.array(list(set(sum([self._get_neighbors(resind, no_neighbors) for resind in list(clique)], [])))))
+        for k_clique_array in cliques:
+            for clique in k_clique_array:
+                # if there are required chains, ensure they are in the clique
+                if len(required_chains) and np.any(~np.in1d(required_chains, chains[clique])):
+                    continue
+                binding_core = np.sort(np.unique(sum([self._get_neighbors(resind, no_neighbors) for resind in clique], [])))
+                if not len(binding_core):
+                    continue
+                # construct the appropriate sequences for the core
+                if mpnn_predictions is not None:
+                    probs = np.exp(mpnn_predictions[clique][:, np.array([2, 3, 6, 15])])
+                    possible_aas = ['ASP', 'GLU', 'HIS', 'SER']
+                    aas = []
+                    for row in probs:
+                        aas.append([possible_aas[i] for i, prob in enumerate(row) 
+                                    if prob >= mpnn_threshold])
+                    sequences = [np.array(tup) for tup in itertools.product(*aas)]
+                else:
+                    sequences = [self.sequence[binding_core]]
                 # print(len(self.sequence), clique, binding_core, self._resindices[-1])
-                sequence = self.sequence[binding_core]
                 identifiers = [self.resind2id[resind] for resind in binding_core]
                 core = self.structure.select('resindex ' + ' '.join([str(num) for num in binding_core]))
                 # print(core)
@@ -484,14 +516,17 @@ class Protein:
                     matrix = sub_matrices.reshape(-1,len(binding_core),n,r).transpose(0,2,1,3).reshape(-1,len(binding_core)*r)
                     padded = np.zeros((max_atoms, max_atoms))
                     padded[0:len(matrix), 0:len(matrix)] = matrix
-                    fcn_cores.append(FCNCore(self.filepath, core, clique, identifiers, sequence, padded, putative=True))
+                    for sequence in sequences:
+                        fcn_cores.append(FCNCore(self.filepath, core, clique, identifiers, sequence, padded, putative=True))
 
                 if cnn:
                     binding_core = np.array(binding_core)
                     distance_matrix_channels = np.zeros((4,12,12))
                     row_inds, col_inds = np.meshgrid(binding_core, binding_core)
                     distance_matrix_channels = self.channels[:, row_inds, col_inds]
-                    cnn_cores.append(CNNCore(self.filepath, core, clique, identifiers, sequence, distance_matrix_channels, putative=True))
+                    for sequence in sequences:
+                        cnn_cores.append(CNNCore(self.filepath, core, clique, identifiers, sequence, distance_matrix_channels, putative=True))
+        
         return fcn_cores, cnn_cores
 
     @staticmethod
@@ -499,7 +534,7 @@ class Protein:
         """Filters pairs of contacts based on relative orientation of Ca-Cb and Ca-Ca bond vectors. 
 
         Args:
-            edge_list (np.ndarray): nx2 array containing pairs of contacts.
+            edge_list (np.ndarray): nx2 array containing pairs of contacts
             structure (AtomGroup): AtomGroup object of input structure.
             distances (np.ndarray): Array of length n containing distance between each contact.
 
@@ -508,7 +543,7 @@ class Protein:
         """
 
         #get backbone atom coordinates for all residues included in the edge list
-        all_resindices = set(np.concatenate(list(edge_list)))
+        all_resindices = np.unique(edge_list)
         coordinates = dict([(resindex, structure.select('protein').select('name C CA N').select(f'resindex {resindex}').getCoords()) for resindex in all_resindices])
 
         #for each pair of contacts, get coordinates for atom i and j
