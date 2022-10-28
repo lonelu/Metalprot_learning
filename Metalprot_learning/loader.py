@@ -162,6 +162,9 @@ class FCNCore(Core):
         super().__init__(source, core, coordinating_resis, identifiers, sequence, putative)
         self.distance_matrix, self.encoding = distance_matrix, FCNCore._onehotencode(self.sequence)
         self.permuted_distance_matrices, self.permuted_encodings = [None], [None]
+        for iteration, id in enumerate(self.identifiers):
+            residue = core.select(f'chain {id[1]}').select(f'resnum {id[0]}').select('name C CA N O').getCoords()
+            self.core_coords = residue if iteration == 0 else np.vstack([self.core_coords, residue])
 
     @staticmethod
     def _onehotencode(sequence: np.ndarray):
@@ -452,7 +455,7 @@ class Protein:
                                   'match the number of residues in the PDB file'))
             # determine resindices for which the probability of at least one of the four 
             # metal-coordinating amino acids exceeds the threshold value
-            mask = np.sum(np.exp(mpnn_predictions[:, np.array([2, 3, 6, 15])]) >= 
+            mask = np.sum(np.exp(mpnn_predictions[:, np.array([1, 2, 3, 6])]) >= 
                           mpnn_threshold, axis=1).astype(bool)
             putative_coordinating_resindices = putative_coordinating_resindices[mask]
             selstr = ' or '.join(['resindex {}'.format(resindex) for resindex in 
@@ -495,8 +498,8 @@ class Protein:
                     continue
                 # construct the appropriate sequences for the core
                 if mpnn_predictions is not None:
-                    probs = np.exp(mpnn_predictions[clique][:, np.array([2, 3, 6, 15])])
-                    possible_aas = ['ASP', 'GLU', 'HIS', 'SER']
+                    probs = np.exp(mpnn_predictions[clique][:, np.array([1, 2, 3, 6])])
+                    possible_aas = ['CYS', 'ASP', 'GLU', 'HIS']
                     aas = []
                     for row in probs:
                         aas.append([possible_aas[i] for i, prob in enumerate(row) 

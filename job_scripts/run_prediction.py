@@ -12,15 +12,14 @@ import torch
 import argparse
 import numpy as np
 import pandas as pd
-from Metalprot_learning import loader
+from prody import parsePDB
+from Metalprot_learning import loader, triangulator
 from Metalprot_learning.train.models import FullyConnectedNet, Classifier
 
 def distribute_tasks(path2pdbs: str, path2npzs: str, num_jobs: int, job_id: int):
     """
     Distributes pdb files across multiple cores for loading.
     """
-    # print('path2pdbs =', path2pdbs, '\t', 'path2npzs =', path2npzs)
-    # print('num_jobs =', num_jobs, '\t', 'job_id =', job_id)
     plist = sorted(os.listdir(path2pdbs))
     pdbs = [os.path.join(path2pdbs, path) for path in plist if '.pdb' in path]
     if path2npzs:
@@ -30,11 +29,6 @@ def distribute_tasks(path2pdbs: str, path2npzs: str, num_jobs: int, job_id: int)
         if len(pdbs) != len(npzs):
             raise ValueError(('path2npzs is provided, but some PDB files have '
                               'missing MPNN-generated NPZ files.'))
-        
-        # print(len(pdbs))
-        # print(pdbs)
-        # print(npzs)
-        # print(i % num_jobs == job_id for i in range(len(pdbs)))
         tasks = [(pdbs[i], npzs[i]) for i in range(len(pdbs)) 
                  if i % num_jobs == job_id - 1]
     else:
@@ -60,11 +54,10 @@ def instantiate_models():
 def run_site_enumeration(tasks: list, coordination_number: tuple, mpnn_threshold: float, required_chains: list, remove_redundant: bool):
     sources, identifiers, features = [], [], []
     failed = []
-    df = pd.DataFrame(columns=['identifiers', 'source', 'distance_matrices', 
+    df = pd.DataFrame(columns=['identifiers', 'source', 'distance_matrices', 'core_coords', 
                                'encodings', 'channels', 'metal_coords', 'labels'])
     for pdb_file, npz_file in tasks:
-        # try:
-        for char in 'a':
+        try:
             print(pdb_file)
             protein = loader.Protein(pdb_file)
             if npz_file is not None:
@@ -81,10 +74,12 @@ def run_site_enumeration(tasks: list, coordination_number: tuple, mpnn_threshold
                 unique_fcn_cores, unique_cnn_cores = loader.remove_degenerate_cores(fcn_cores), loader.remove_degenerate_cores(cnn_cores)
             else:
                 unique_fcn_cores, unique_cnn_cores = fcn_cores, cnn_cores
-            identifiers, distance_matrices, encodings, channels, metal_coordinates, labels = [], [], [], [], [], []
+            identifiers, distance_matrices, core_coords, encodings, channels, metal_coordinates, labels = \
+                [], [], [], [], [], [], []
             for fcn_core, cnn_core in zip(unique_fcn_cores, unique_cnn_cores):
                 identifiers.append(fcn_core.identifiers)
                 distance_matrices.append(fcn_core.distance_matrix)
+                core_coords.append(fcn_core.core_coords)
                 encodings.append(fcn_core.encoding)
                 channels.append(cnn_core.channels)
                 metal_coordinates.append(fcn_core.metal_coords)
@@ -93,13 +88,14 @@ def run_site_enumeration(tasks: list, coordination_number: tuple, mpnn_threshold
                 {'identifiers': identifiers, 
                 'source': [pdb_file] * len(identifiers),
                 'distance_matrices': distance_matrices,
+                'core_coords': core_coords,
                 'encodings': encodings,
                 'channels': channels,
                 'metal_coords': metal_coordinates,
                 'labels': labels})])
 
-        # except:
-        #     failed.append(pdb_file)
+        except:
+            failed.append(pdb_file)
     return df, failed
 
 def parse_args():
@@ -130,7 +126,7 @@ def parse_args():
                       'cores will be removed.')
     argp.add_argument('--num_jobs', type=int, default=1, 
                       help='Number of jobs to run. (Default: 1)')
-    argp.add_argument('--job_id', type=int, default=0, 
+    argp.add_argument('--job_id', type=int, default=1, 
                       help='ID of current job if multiple jobs are run.')
     return argp.parse_args()
 
@@ -153,7 +149,8 @@ if __name__ == '__main__':
     classifier, regressor = instantiate_models()
     classifications = classifier.forward(torch.from_numpy(classifier_features)).cpu().detach().numpy()
     rounded_classifications = classifications.round()
-    metal_site_inds = np.argwhere(classifications == 1).flatten()
+    # metal_site_inds = np.argwhere(classifications == 1).flatten()
+    metal_site_inds = np.arange(len(classifications))
     _regressions = regressor.forward(torch.from_numpy(regressor_features[metal_site_inds])).cpu().detach().numpy().round()
     
     regressions = np.zeros((len(classifications), 48))
@@ -162,6 +159,23 @@ if __name__ == '__main__':
     features_df['classifications'] = classifications
     features_df['rounded_classifications'] = rounded_classifications
     features_df['regressions'] = list(regressions)
+
+    metal_coords = []
+    uncertainties = []
+    for i in range(len(features_df)):
+        try:
+            metal_pred, uncertainty = \
+                triangulator.triangulate(features_df.iloc[i].regressions, 
+                                         features_df.iloc[i].distance_matrices, 
+                                         features_df.iloc[i].core_coords)
+            metal_coords.append(metal_pred)
+            uncertainties.append(uncertainty)
+        except:
+            metal_coords.append(np.array([np.nan, np.nan, np.nan]))
+            uncertainties.append(np.nan)
+
+    features_df['metal_coords'] = metal_coords
+    features_df['uncertainties'] = uncertainties
     
     if not os.path.exists(path2output):
         os.mkdir(path2output)
