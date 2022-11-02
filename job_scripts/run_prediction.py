@@ -54,8 +54,9 @@ def instantiate_models():
 def run_site_enumeration(tasks: list, coordination_number: tuple, mpnn_threshold: float, required_chains: list, remove_redundant: bool):
     sources, identifiers, features = [], [], []
     failed = []
-    df = pd.DataFrame(columns=['identifiers', 'source', 'distance_matrices', 'core_coords', 
-                               'encodings', 'channels', 'metal_coords', 'labels'])
+    df = pd.DataFrame(columns=['identifiers', 'source', 'distance_matrices', 
+                               'core_coords', 'encodings', 'channels', 
+                               'metal_coords', 'uncertainties', 'labels'])
     for pdb_file, npz_file in tasks:
         try:
             print(pdb_file)
@@ -74,7 +75,8 @@ def run_site_enumeration(tasks: list, coordination_number: tuple, mpnn_threshold
                 unique_fcn_cores, unique_cnn_cores = loader.remove_degenerate_cores(fcn_cores), loader.remove_degenerate_cores(cnn_cores)
             else:
                 unique_fcn_cores, unique_cnn_cores = fcn_cores, cnn_cores
-            identifiers, distance_matrices, core_coords, encodings, channels, metal_coordinates, labels = \
+            identifiers, distance_matrices, core_coords, encodings, \
+                    channels, metal_coordinates, labels = \
                 [], [], [], [], [], [], []
             for fcn_core, cnn_core in zip(unique_fcn_cores, unique_cnn_cores):
                 identifiers.append(fcn_core.identifiers)
@@ -92,6 +94,7 @@ def run_site_enumeration(tasks: list, coordination_number: tuple, mpnn_threshold
                 'encodings': encodings,
                 'channels': channels,
                 'metal_coords': metal_coordinates,
+                'uncertainties': [np.nan] * len(identifiers),
                 'labels': labels})])
 
         except:
@@ -104,16 +107,16 @@ def parse_args():
                       help='Path at which to store model outputs.')
     argp.add_argument('path2pdbs', type=os.path.realpath, 
                       help='Path to directory containing input PDB files.')
-    argp.add_argument('--path2npzs', type=os.path.realpath, default='',  
+    argp.add_argument('--path2npzs', default='',  
                       help='Path to directory containing NPZ files from '
                       'ProteinMPNN run on each PDB in path2pdbs with the '
                       '--unconditional-probs-only flag set.  If a path is '
                       'provided, residues are included during site '
                       'enumeration if their MPNN probabilities of being '
-                      'D, E, H, or S exceed a threshold value.')
+                      'C, D, E, or H exceed a threshold value.')
     argp.add_argument('--mpnn_threshold', type=float, default=0.25, 
                       help='Threshold MPNN-predicted probability of a '
-                      'residue being D, E, H, or S in order for it to '
+                      'residue being C, D, E, or H in order for it to '
                       'be included in cores during site enumeration. '
                       '(Default: 0.25)')
     argp.add_argument('--required_chains', nargs='+', 

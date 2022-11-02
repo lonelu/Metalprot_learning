@@ -63,7 +63,7 @@ def run_SGE(job_name: str, num_jobs: int, path: str, job_script: str, job_argume
         shutil.rmtree(job_output_path)
 
     if not os.path.exists(job_output_path):
-        os.mkdir(job_output_path)
+        os.makedirs(job_output_path)
 
     qsub_command = ['qsub',
                         '-cwd'] \
