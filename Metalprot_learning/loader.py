@@ -163,7 +163,7 @@ class FCNCore(Core):
         self.distance_matrix, self.encoding = distance_matrix, FCNCore._onehotencode(self.sequence)
         self.permuted_distance_matrices, self.permuted_encodings = [None], [None]
         for iteration, id in enumerate(self.identifiers):
-            residue = core.select(f'chain {id[1]}').select(f'resnum {id[0]}').select('name C CA N O').getCoords()
+            residue = core.select(f'chain {id[1]}').select(f'resnum `{id[0]}`').select('name C CA N O').getCoords()
             self.core_coords = residue if iteration == 0 else np.vstack([self.core_coords, residue])
 
     @staticmethod
@@ -491,7 +491,7 @@ class Protein:
         for k_clique_array in cliques:
             for clique in k_clique_array:
                 # if there are required chains, ensure they are in the clique
-                if len(required_chains) and np.any(~np.in1d(required_chains, chains[clique])):
+                if required_chains is not None and np.any(~np.in1d(required_chains, chains[clique])):
                     continue
                 binding_core = np.sort(np.unique(sum([self._get_neighbors(resind, no_neighbors) for resind in clique], [])))
                 if not len(binding_core):
@@ -529,7 +529,7 @@ class Protein:
                     distance_matrix_channels = self.channels[:, row_inds, col_inds]
                     for sequence in sequences:
                         cnn_cores.append(CNNCore(self.filepath, core, clique, identifiers, sequence, distance_matrix_channels, putative=True))
-        
+       
         return fcn_cores, cnn_cores
 
     @staticmethod

@@ -7,14 +7,11 @@ Wrapper script to run jobs for Metalprot_learning on wynton. Code
 adapted from Xingjie Pan's loop-helix-loop reshaping repository.
 
 Usage:
-    ./run_jobs.py <job-name> <path> <job-script> [options]
+    ./run_jobs.py <job-name> <job-script> [options]
 
 Arguments:
     <job-name> 
         Job name of user's choosing.
-
-    <path>
-        Path to output directory to dump job output files and logs.
 
     <job-script>
         Job script for the analysis.
@@ -70,11 +67,11 @@ def run_SGE(job_name: str, num_jobs: int, path: str, job_script: str, job_argume
                      + ['-N', job_name,
                         '-t', '1-{0}'.format(num_jobs),
                         '-l', 'h_rt={0}'.format(time),
+                        '-l', 'hostname=qb3-id*', # ensure AVX2 instructions
                         '-o', job_output_path,
                         '-e', job_output_path,
                         './job_scripts/activate_env.sh',
-                        job_script,
-                        path] \
+                        job_script] \
                         + job_arguments.split() \
                         + [' --num_jobs ', str(num_jobs), ' --job_id ']
 
@@ -85,15 +82,16 @@ def run_SGE(job_name: str, num_jobs: int, path: str, job_script: str, job_argume
     subprocess.run(qsub_command)
 
 def run_sequential(job_name: str, path: str, job_script: str, job_arguments: str, keep_job_output_path=True):
-    command = [job_script, path] + job_arguments.split()
+    command = [job_script] + job_arguments.split()
     subprocess.run(command)
 
 if __name__ == '__main__':
     
     arguments = docopt.docopt(__doc__)
-    path = arguments['<path>']
     job_script = arguments['<job-script>']
     job_name = arguments['<job-name>']
+
+    path = arguments['--job-arguments'].split()[0]
 
     if arguments['--job-distributor'] == 'SGE':
         num_jobs = arguments['--num-jobs'] if arguments['--num-jobs'] else '1'

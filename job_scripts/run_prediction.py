@@ -103,9 +103,9 @@ def run_site_enumeration(tasks: list, coordination_number: tuple, mpnn_threshold
 
 def parse_args():
     argp = argparse.ArgumentParser()
-    argp.add_argument('path2output', type=os.path.realpath, 
+    argp.add_argument('path2output', 
                       help='Path at which to store model outputs.')
-    argp.add_argument('path2pdbs', type=os.path.realpath, 
+    argp.add_argument('path2pdbs',  
                       help='Path to directory containing input PDB files.')
     argp.add_argument('--path2npzs', default='',  
                       help='Path to directory containing NPZ files from '
@@ -152,8 +152,8 @@ if __name__ == '__main__':
     classifier, regressor = instantiate_models()
     classifications = classifier.forward(torch.from_numpy(classifier_features)).cpu().detach().numpy()
     rounded_classifications = classifications.round()
-    # metal_site_inds = np.argwhere(classifications == 1).flatten()
-    metal_site_inds = np.arange(len(classifications))
+    metal_site_inds = np.argwhere(classifications == 1).flatten()
+    # metal_site_inds = np.arange(len(classifications))
     _regressions = regressor.forward(torch.from_numpy(regressor_features[metal_site_inds])).cpu().detach().numpy().round()
     
     regressions = np.zeros((len(classifications), 48))
